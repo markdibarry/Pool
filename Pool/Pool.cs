@@ -1,4 +1,7 @@
-﻿namespace GameCore.Utility;
+﻿using System;
+using System.Collections.Generic;
+
+namespace GameCore.Utility;
 
 /// <summary>
 /// Represents a pool of objects that can be borrowed and returned. 
