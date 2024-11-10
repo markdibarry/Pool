@@ -9,26 +9,28 @@ namespace GameCore.Utility;
 public static class Pool
 {
     private static readonly object s_lock = new();
-    private static readonly Dictionary<Type, LimitedQueue<IPoolable>> s_pool = [];
+    private static readonly Dictionary<Type, PoolQueue<IPoolable>> s_pool = [];
+    private static readonly Dictionary<Type, LimitedQueue<object>> s_listPool = [];
+    private const int LimitDefault = 100;
 
     /// <summary>
     /// Populates the provided queue with the specified number of objects.
     /// </summary>
     /// <typeparam name="T">The pool type to allocate to.</typeparam>
-    /// <param name="limitedQueue">The queue to populate.</param>
+    /// <param name="poolQueue">The queue to populate.</param>
     /// <param name="amount">The amount of objects to allocate to the pool.</param>
-    private static void Allocate<T>(LimitedQueue<IPoolable> limitedQueue, int amount)
+    private static void Allocate<T>(PoolQueue<IPoolable> poolQueue, int amount)
         where T : IPoolable, new()
     {
         int toAllocate = Math.Max(amount, 0);
 
-        if (limitedQueue.Limit != -1)
-            toAllocate = Math.Min(toAllocate, limitedQueue.Limit - limitedQueue.Count);
+        if (poolQueue.Limit != -1)
+            toAllocate = Math.Min(toAllocate, poolQueue.Limit - poolQueue.Count);
 
         for (int i = 0; i < toAllocate; i++)
         {
             IPoolable obj = new T();
-            limitedQueue.Enqueue(obj);
+            poolQueue.Enqueue(obj);
         }
     }
 
@@ -42,10 +44,10 @@ public static class Pool
     {
         Type type = typeof(T);
 
-        if (!s_pool.TryGetValue(type, out LimitedQueue<IPoolable>? limitedQueue))
+        if (!s_pool.TryGetValue(type, out PoolQueue<IPoolable>? poolQueue))
             throw new UnregisteredTypeException(type);
 
-        Allocate<T>(limitedQueue, amount);
+        Allocate<T>(poolQueue, amount);
     }
 
     /// <summary>
@@ -58,12 +60,12 @@ public static class Pool
     {
         Type type = typeof(T);
 
-        if (!s_pool.TryGetValue(type, out LimitedQueue<IPoolable>? limitedQueue))
+        if (!s_pool.TryGetValue(type, out PoolQueue<IPoolable>? poolQueue))
             throw new UnregisteredTypeException(type);
 
         lock (s_lock)
         {
-            Allocate<T>(limitedQueue, amount);
+            Allocate<T>(poolQueue, amount);
         }
     }
 
@@ -78,10 +80,10 @@ public static class Pool
     {
         Type type = typeof(T);
 
-        if (!s_pool.TryGetValue(type, out LimitedQueue<IPoolable>? limitedQueue))
+        if (!s_pool.TryGetValue(type, out PoolQueue<IPoolable>? poolQueue))
             throw new UnregisteredTypeException(type);
 
-        return limitedQueue.Count > 0 ? (T)limitedQueue.Dequeue() : new();
+        return poolQueue.Count > 0 ? (T)poolQueue.Dequeue() : new();
     }
 
     /// <summary>
@@ -95,13 +97,29 @@ public static class Pool
     {
         Type type = typeof(T);
 
-        if (!s_pool.TryGetValue(type, out LimitedQueue<IPoolable>? limitedQueue))
+        if (!s_pool.TryGetValue(type, out PoolQueue<IPoolable>? poolQueue))
             throw new UnregisteredTypeException(type);
 
         lock (s_lock)
         {
-            return limitedQueue.Count > 0 ? (T)limitedQueue.Dequeue() : new();
+            return poolQueue.Count > 0 ? (T)poolQueue.Dequeue() : new();
         }
+    }
+
+    /// <summary>
+    /// Retrieves a List from the pool of a registered type.
+    /// If the pool is empty, a new List is created.
+    /// </summary>
+    /// <typeparam name="T"></typeparam>
+    /// <returns></returns>
+    public static List<T> GetList<T>() where T : IPoolable
+    {
+        Type type = typeof(T);
+
+        if (!s_listPool.TryGetValue(type, out LimitedQueue<object>? poolQueue))
+            return [];
+
+        return poolQueue.Count > 0 ? (List<T>)poolQueue.Dequeue() : [];
     }
 
     /// <summary>
@@ -116,10 +134,10 @@ public static class Pool
     {
         Type type = poolable.GetType();
 
-        if (!s_pool.TryGetValue(type, out LimitedQueue<IPoolable>? limitedQueue))
+        if (!s_pool.TryGetValue(type, out PoolQueue<IPoolable>? poolQueue))
             throw new UnregisteredTypeException(type);
 
-        return (T)limitedQueue.CreateFunc();
+        return poolQueue.Count > 0 ? (T)poolQueue.Dequeue() : (T)poolQueue.CreateFunc();
     }
 
     /// <summary>
@@ -134,9 +152,9 @@ public static class Pool
         where T : IPoolable, new()
     {
         Type type = typeof(T);
-        LimitedQueue<IPoolable> limitedQueue = new(limit, () => Get<T>());
-        s_pool[type] = limitedQueue;
-        Allocate<T>(limitedQueue, preAllocateAmount);
+        PoolQueue<IPoolable> poolQueue = new(limit, () => Get<T>());
+        s_pool[type] = poolQueue;
+        Allocate<T>(poolQueue, preAllocateAmount);
     }
 
     /// <summary>
@@ -151,12 +169,12 @@ public static class Pool
         where T : IPoolable, new()
     {
         Type type = typeof(T);
-        LimitedQueue<IPoolable> limitedQueue = new(limit, () => Get<T>());
-        s_pool[type] = limitedQueue;
+        PoolQueue<IPoolable> poolQueue = new(limit, () => Get<T>());
+        s_pool[type] = poolQueue;
 
         lock (s_lock)
         {
-            Allocate<T>(limitedQueue, preAllocateAmount);
+            Allocate<T>(poolQueue, preAllocateAmount);
         }
     }
 
@@ -170,10 +188,10 @@ public static class Pool
         poolable.ClearObject();
         Type type = poolable.GetType();
 
-        if (!s_pool.TryGetValue(type, out LimitedQueue<IPoolable>? limitedQueue))
+        if (!s_pool.TryGetValue(type, out PoolQueue<IPoolable>? poolQueue))
             throw new UnregisteredTypeException(type);
 
-        limitedQueue.Enqueue(poolable);
+        poolQueue.Enqueue(poolable);
     }
 
     /// <summary>
@@ -187,13 +205,43 @@ public static class Pool
         poolable.ClearObject();
         Type type = poolable.GetType();
 
-        if (!s_pool.TryGetValue(type, out LimitedQueue<IPoolable>? limitedQueue))
+        if (!s_pool.TryGetValue(type, out PoolQueue<IPoolable>? poolQueue))
             throw new UnregisteredTypeException(type);
 
         lock (s_lock)
         {
-            limitedQueue.Enqueue(poolable);
+            poolQueue.Enqueue(poolable);
         }
+    }
+
+    /// <summary>
+    /// Returns the provided List to the pool of the underlying registered type.
+    /// If the List contains IPoolable objects, they will be returned to their pool as well.
+    /// </summary>
+    /// <typeparam name="T"></typeparam>
+    /// <param name="list"></param>
+    public static void Return<T>(List<T> list)
+    {
+        Type type = typeof(T);
+
+        if (type.IsAssignableTo(typeof(IPoolable)))
+        {
+            foreach (T item in list)
+            {
+                if (item is IPoolable poolable)
+                    Return(poolable);
+            }
+        }
+
+        list.Clear();
+
+        if (!s_listPool.TryGetValue(type, out LimitedQueue<object>? limitedQueue))
+        {
+            limitedQueue = new(LimitDefault);
+            s_listPool[type] = limitedQueue;
+        }
+
+        limitedQueue.Enqueue(list);
     }
 
     /// <summary>

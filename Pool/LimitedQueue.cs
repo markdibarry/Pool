@@ -8,20 +8,15 @@ namespace GameCore.Utility;
 /// </summary>
 public class LimitedQueue<T>
 {
-    public LimitedQueue(int limit, Func<T> createFunc)
+    public LimitedQueue(int limit)
     {
         Limit = limit;
-        CreateFunc = createFunc;
     }
 
     /// <summary>
     /// The queue object
     /// </summary>
-    public Queue<T> Queue { get; set; } = [];
-    /// <summary>
-    /// A delegate to create a new object of the queue's underlying type.
-    /// </summary>
-    public Func<T> CreateFunc { get; set; }
+    private readonly Queue<T> _queue = [];
     /// <summary>
     /// The upper limit for adding items to the queue.
     /// </summary>
@@ -29,7 +24,7 @@ public class LimitedQueue<T>
     /// <summary>
     /// Gets the number of elements contained within the queue.
     /// </summary>
-    public int Count => Queue.Count;
+    public int Count => _queue.Count;
 
     /// <summary>
     /// Adds an object to the end of the queue.
@@ -38,12 +33,26 @@ public class LimitedQueue<T>
     public void Enqueue(T item)
     {
         if (Limit == -1 || Count < Limit)
-            Queue.Enqueue(item);
+            _queue.Enqueue(item);
     }
 
     /// <summary>
     /// Removes and returns an object at the beginning of the queue.
     /// </summary>
     /// <returns>The object that is removed from the beginning of the queue.</returns>
-    public T Dequeue() => Queue.Dequeue();
+    public T Dequeue() => _queue.Dequeue();
+}
+
+public class PoolQueue<T> : LimitedQueue<T>
+{
+    public PoolQueue(int limit, Func<T> createFunc)
+        : base(limit)
+    {
+        CreateFunc = createFunc;
+    }
+
+    /// <summary>
+    /// A delegate to create a new object of the queue's underlying type.
+    /// </summary>
+    public Func<T> CreateFunc { get; set; }
 }
